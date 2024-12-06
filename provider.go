@@ -21,7 +21,9 @@ type Provider struct {
 
 // GetRecords lists all the records in the zone.
 func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
-	params := fmt.Sprintf("appid=%s&ym=%s", p.APPID, zone)
+	trimmedZone := libdnsZoneToDnslaDomain(zone)
+
+	params := fmt.Sprintf("appid=%s&ym=%s", p.APPID, trimmedZone)
 
 	response, err := MakeApiRequest("POST", "/api/resolution/list", params, p.APPKey, ResolutionList{})
 	if err != nil {
@@ -30,7 +32,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 	recs := make([]libdns.Record, 0, len(response.Data))
 	for _, rec := range response.Data {
-		recs = append(recs, rec.toLibdnsRecord(zone))
+		recs = append(recs, rec.toLibdnsRecord(trimmedZone))
 	}
 	return recs, nil
 }
@@ -38,9 +40,11 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 // AppendRecords adds records to the zone. It returns the records that were added.
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	var successfullyAppendedRecords []libdns.Record
+	trimmedZone := libdnsZoneToDnslaDomain(zone)
+
 	for _, record := range records {
 		params := fmt.Sprintf("appid=%s&ym=%s&lx=%s&zj=%s&jlz=%s&mx=%d&ttl=%.0f",
-			p.APPID, zone, record.Type, record.Name, record.Value, record.Weight, record.TTL.Seconds())
+			p.APPID, trimmedZone, record.Type, record.Name, record.Value, record.Weight, record.TTL.Seconds())
 
 		response, err := MakeApiRequest("POST", "/api/resolution/add", params, p.APPKey, AddDomainRecord{})
 		if err != nil {
@@ -66,6 +70,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 // It returns the updated records.
 func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	var successfullyUpdatedRecords []libdns.Record
+	trimmedZone := libdnsZoneToDnslaDomain(zone)
 
 	recs, err := p.GetRecords(ctx, zone)
 	if err != nil {
@@ -97,7 +102,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 		}
 
 		params := fmt.Sprintf("appid=%s&ym=%s&lx=%s&zj=%s&jlz=%s&mx=%d&ttl=%.0f&jxid=%d",
-			p.APPID, zone, record.Type, record.Name, record.Value, record.Weight, record.TTL.Seconds(), recordId)
+			p.APPID, trimmedZone, record.Type, record.Name, record.Value, record.Weight, record.TTL.Seconds(), recordId)
 
 		response, err := MakeApiRequest("POST", "/api/resolution/edit", params, p.APPKey, UpdateDomainRecord{})
 		if err != nil {
@@ -122,6 +127,7 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 // DeleteRecords deletes the records from the zone. It returns the records that were deleted.
 func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	var successfullyDeletedRecords []libdns.Record
+	trimmedZone := libdnsZoneToDnslaDomain(zone)
 
 	recs, err := p.GetRecords(ctx, zone)
 	if err != nil {
@@ -137,7 +143,7 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 			}
 		}
 
-		params := fmt.Sprintf("appid=%s&ym=%s&jxid=%s", p.APPID, zone, record.ID)
+		params := fmt.Sprintf("appid=%s&ym=%s&jxid=%s", p.APPID, trimmedZone, record.ID)
 
 		response, err := MakeApiRequest("POST", "/api/resolution/delete", params, p.APPKey, DeleteDomainRecord{})
 		if err != nil {

@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+// libdnsZoneToDnslaDomain Strips the trailing dot from a Zone
+func libdnsZoneToDnslaDomain(zone string) string {
+	return strings.TrimSuffix(zone, ".")
+}
+
 const ApiBase = "https://api.gname.com"
 
 func MakeApiRequest[T any](method string, endpoint string, params string, appKey string, responseType T) (T, error) {
