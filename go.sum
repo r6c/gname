@@ -1,2 +1,4 @@
-github.com/libdns/libdns v0.2.1 h1:Wu59T7wSHRgtA0cfxC+n1c/e+O3upJGWytknkmFEDis=
-github.com/libdns/libdns v0.2.1/go.mod h1:yQCXzk1lEZmmCPa857bnk4TsOiqYasqpyOEeSObbb40=
+github.com/libdns/libdns v0.2.2 h1:O6ws7bAfRPaBsgAYt8MDe2HcNBGC29hkZ9MX2eUSX3s=
+github.com/libdns/libdns v0.2.2/go.mod h1:4Bj9+5CQiNMVGf87wjX4CY3HQJypUHRuLvlsfsZqLWQ=
+github.com/yuchenfw/go-join v0.0.0-20210930100310-0ccbee336e4a h1:VbiyegeHFIDABlHit6D8ZUGpaCiVeCTPxkO+lvKh8PM=
+github.com/yuchenfw/go-join v0.0.0-20210930100310-0ccbee336e4a/go.mod h1:gon5HPS7VfB1/TT9SKzNdpd9zhxjd6ketI4stORDgdw=
