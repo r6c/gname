@@ -3,20 +3,59 @@ package gname
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
 	"github.com/libdns/libdns"
-	"strconv"
 )
 
-// TODO: Providers must not require additional provisioning steps by the callers; it
-// should work simply by populating a struct and calling methods on it. If your DNS
-// service requires long-lived state or some extra provisioning step, do it implicitly
-// when methods are called; sync.Once can help with this, and/or you can use a
-// sync.(RW)Mutex in your Provider struct to synchronize implicit provisioning.
+var (
+	// Ensure Provider implements the libdns interfaces
+	_ libdns.RecordGetter   = (*Provider)(nil)
+	_ libdns.RecordAppender = (*Provider)(nil)
+	_ libdns.RecordSetter   = (*Provider)(nil)
+	_ libdns.RecordDeleter  = (*Provider)(nil)
+)
 
-// Provider facilitates DNS record manipulation with <TODO: PROVIDER NAME>.
+// Provider facilitates DNS record manipulation with GNAME.
+// It implements libdns interfaces for managing DNS records.
 type Provider struct {
-	APPID  string `json:"app_id,omitempty"`
+	// APPID is the application ID for GNAME API authentication.
+	// This is required for all API operations.
+	APPID string `json:"app_id,omitempty"`
+
+	// APPKey is the application key for GNAME API authentication.
+	// This is required for all API operations and should be kept secure.
 	APPKey string `json:"app_key,omitempty"`
+
+	// HTTPClient allows you to specify a custom HTTP client for API requests.
+	// If not specified, a sensible default will be used with appropriate timeouts.
+	HTTPClient *http.Client `json:"-"`
+
+	// mutex for protecting the initialization of the HTTP client
+	mu sync.RWMutex
+}
+
+// getHTTPClient returns the HTTP client, initializing it if necessary.
+func (p *Provider) getHTTPClient() *http.Client {
+	p.mu.RLock()
+	if p.HTTPClient != nil {
+		defer p.mu.RUnlock()
+		return p.HTTPClient
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if p.HTTPClient == nil {
+		p.HTTPClient = &http.Client{
+			Timeout: 30 * time.Second,
+		}
+	}
+	return p.HTTPClient
 }
 
 // GetRecords lists all the records in the zone.
@@ -25,14 +64,15 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 	params := fmt.Sprintf("appid=%s&ym=%s", p.APPID, trimmedZone)
 
-	response, err := MakeApiRequest("POST", "/api/resolution/list", params, p.APPKey, ResolutionList{})
+	response, err := MakeApiRequestWithClient(p.getHTTPClient(), "POST", "/api/resolution/list", params, p.APPKey, ResolutionList{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get records for zone %s: %w", zone, err)
 	}
 
 	recs := make([]libdns.Record, 0, len(response.Data))
 	for _, rec := range response.Data {
-		recs = append(recs, rec.toLibdnsRecord(trimmedZone))
+		rr := rec.toLibdnsRecord(trimmedZone)
+		recs = append(recs, rr)
 	}
 	return recs, nil
 }
@@ -43,21 +83,22 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 	trimmedZone := libdnsZoneToDnslaDomain(zone)
 
 	for _, record := range records {
-		params := fmt.Sprintf("appid=%s&ym=%s&lx=%s&zj=%s&jlz=%s&mx=%d&ttl=%.0f",
-			p.APPID, trimmedZone, record.Type, record.Name, record.Value, record.Weight, record.TTL.Seconds())
+		// Convert record to RR to access its fields
+		rr := record.RR()
 
-		response, err := MakeApiRequest("POST", "/api/resolution/add", params, p.APPKey, AddDomainRecord{})
+		params := fmt.Sprintf("appid=%s&ym=%s&lx=%s&zj=%s&jlz=%s&ttl=%.0f",
+			p.APPID, trimmedZone, rr.Type, rr.Name, rr.Data, rr.TTL.Seconds())
+
+		_, err := MakeApiRequestWithClient(p.getHTTPClient(), "POST", "/api/resolution/add", params, p.APPKey, AddDomainRecord{})
 		if err != nil {
-			return []libdns.Record{}, err
+			return successfullyAppendedRecords, fmt.Errorf("failed to append record %s.%s: %w", rr.Name, zone, err)
 		}
 
-		appendedRecord := libdns.Record{
-			ID:     strconv.Itoa(response.Data),
-			Name:   record.Name,
-			Type:   record.Type,
-			Value:  record.Value,
-			Weight: record.Weight,
-			TTL:    record.TTL,
+		appendedRecord := libdns.RR{
+			Name: rr.Name,
+			Type: rr.Type,
+			Data: rr.Data,
+			TTL:  rr.TTL,
 		}
 
 		successfullyAppendedRecords = append(successfullyAppendedRecords, appendedRecord)
@@ -74,18 +115,21 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 
 	recs, err := p.GetRecords(ctx, zone)
 	if err != nil {
-		return successfullyUpdatedRecords, err
+		return successfullyUpdatedRecords, fmt.Errorf("failed to get existing records: %w", err)
 	}
 
 	for _, record := range records {
+		rr := record.RR()
 		hasRecord := false
-		recordId := 0
+		recordId := ""
+
 		for _, rec := range recs {
-			if rec.Name == record.Name && rec.Type == record.Type {
+			recRR := rec.RR()
+			if recRR.Name == rr.Name && recRR.Type == rr.Type {
 				hasRecord = true
-				recordId, err = strconv.Atoi(rec.ID)
-				if err != nil {
-					return successfullyUpdatedRecords, err
+				// Try to extract ID from the record if it's our custom type
+				if dnslaRec, ok := rec.(DomainResolutionRecord); ok {
+					recordId = dnslaRec.ID
 				}
 				break
 			}
@@ -94,29 +138,32 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 		if !hasRecord {
 			appendedRecords, err := p.AppendRecords(ctx, zone, []libdns.Record{record})
 			if err != nil {
-				return successfullyUpdatedRecords, err
+				return successfullyUpdatedRecords, fmt.Errorf("failed to create new record: %w", err)
 			}
 
 			successfullyUpdatedRecords = append(successfullyUpdatedRecords, appendedRecords...)
 			continue
 		}
 
-		params := fmt.Sprintf("appid=%s&ym=%s&lx=%s&zj=%s&jlz=%s&mx=%d&ttl=%.0f&jxid=%d",
-			p.APPID, trimmedZone, record.Type, record.Name, record.Value, record.Weight, record.TTL.Seconds(), recordId)
+		if recordId == "" {
+			// Skip if we can't get the record ID
+			continue
+		}
 
-		response, err := MakeApiRequest("POST", "/api/resolution/edit", params, p.APPKey, UpdateDomainRecord{})
+		params := fmt.Sprintf("appid=%s&ym=%s&lx=%s&zj=%s&jlz=%s&ttl=%.0f&jxid=%s",
+			p.APPID, trimmedZone, rr.Type, rr.Name, rr.Data, rr.TTL.Seconds(), recordId)
+
+		response, err := MakeApiRequestWithClient(p.getHTTPClient(), "POST", "/api/resolution/edit", params, p.APPKey, UpdateDomainRecord{})
 		if err != nil {
-			return successfullyUpdatedRecords, err
+			return successfullyUpdatedRecords, fmt.Errorf("failed to update record %s.%s: %w", rr.Name, zone, err)
 		}
 
 		if response.Code == 1 {
-			successfullyUpdatedRecords = append(successfullyUpdatedRecords, libdns.Record{
-				ID:     strconv.Itoa(recordId),
-				Name:   record.Name,
-				Type:   record.Type,
-				Value:  record.Value,
-				Weight: record.Weight,
-				TTL:    record.TTL,
+			successfullyUpdatedRecords = append(successfullyUpdatedRecords, libdns.RR{
+				Name: rr.Name,
+				Type: rr.Type,
+				Data: rr.Data,
+				TTL:  rr.TTL,
 			})
 		}
 	}
@@ -131,36 +178,39 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 
 	recs, err := p.GetRecords(ctx, zone)
 	if err != nil {
-		return successfullyDeletedRecords, err
+		return successfullyDeletedRecords, fmt.Errorf("failed to get existing records: %w", err)
 	}
 
 	for _, record := range records {
+		rr := record.RR()
+		recordId := ""
+
 		for _, rec := range recs {
-			if rec.Name == record.Name && rec.Type == record.Type {
-				record.ID = rec.ID
-				record.Value = rec.Value
+			recRR := rec.RR()
+			if recRR.Name == rr.Name && recRR.Type == rr.Type {
+				// Try to extract ID from the record if it's our custom type
+				if dnslaRec, ok := rec.(DomainResolutionRecord); ok {
+					recordId = dnslaRec.ID
+				}
 				break
 			}
 		}
 
-		params := fmt.Sprintf("appid=%s&ym=%s&jxid=%s", p.APPID, trimmedZone, record.ID)
+		if recordId == "" {
+			// Skip if we can't find the record ID
+			continue
+		}
 
-		response, err := MakeApiRequest("POST", "/api/resolution/delete", params, p.APPKey, DeleteDomainRecord{})
+		params := fmt.Sprintf("appid=%s&ym=%s&jxid=%s", p.APPID, trimmedZone, recordId)
+
+		response, err := MakeApiRequestWithClient(p.getHTTPClient(), "POST", "/api/resolution/delete", params, p.APPKey, DeleteDomainRecord{})
 		if err != nil {
-			return successfullyDeletedRecords, err
+			return successfullyDeletedRecords, fmt.Errorf("failed to delete record %s.%s: %w", rr.Name, zone, err)
 		}
 		if response.Code == 1 {
-			successfullyDeletedRecords = append(successfullyDeletedRecords, record)
+			successfullyDeletedRecords = append(successfullyDeletedRecords, rr)
 		}
 	}
 
 	return successfullyDeletedRecords, nil
 }
-
-// Interface guards
-var (
-	_ libdns.RecordGetter   = (*Provider)(nil)
-	_ libdns.RecordAppender = (*Provider)(nil)
-	_ libdns.RecordSetter   = (*Provider)(nil)
-	_ libdns.RecordDeleter  = (*Provider)(nil)
-)

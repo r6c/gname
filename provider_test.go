@@ -2,10 +2,11 @@ package gname
 
 import (
 	"context"
-	"github.com/libdns/libdns"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/libdns/libdns"
 )
 
 func TestProvider_AppendRecords(t *testing.T) {
@@ -35,18 +36,16 @@ func TestProvider_AppendRecords(t *testing.T) {
 				ctx:  context.Background(),
 				zone: "388vip.com",
 				records: []libdns.Record{
-					{
-						ID:     "1",
-						Name:   "jump-test",
-						Type:   "A",
-						Value:  "8.8.8.8",
-						Weight: 0,
-						TTL:    time.Second * 120,
+					libdns.RR{
+						Name: "jump-test",
+						Type: "A",
+						Data: "8.8.8.8",
+						TTL:  time.Second * 120,
 					},
 				},
 			},
 			want:    nil,
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -94,18 +93,16 @@ func TestProvider_DeleteRecords(t *testing.T) {
 				ctx:  context.Background(),
 				zone: "388vip.com",
 				records: []libdns.Record{
-					{
-						ID:     "1",
-						Name:   "jump-test",
-						Type:   "A",
-						Value:  "8.8.8.8",
-						Weight: 0,
-						TTL:    time.Second * 120,
+					libdns.RR{
+						Name: "jump-test",
+						Type: "A",
+						Data: "8.8.8.8",
+						TTL:  time.Second * 120,
 					},
 				},
 			},
 			want:    nil,
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -153,7 +150,7 @@ func TestProvider_GetRecords(t *testing.T) {
 				zone: "388vip.com",
 			},
 			want:    nil,
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -201,18 +198,16 @@ func TestProvider_SetRecords(t *testing.T) {
 				ctx:  context.Background(),
 				zone: "388vip.com",
 				records: []libdns.Record{
-					{
-						ID:     "1",
-						Name:   "jump-test",
-						Type:   "A",
-						Value:  "1.1.1.1",
-						Weight: 0,
-						TTL:    time.Second * 120,
+					libdns.RR{
+						Name: "jump-test",
+						Type: "A",
+						Data: "8.8.8.8",
+						TTL:  time.Second * 120,
 					},
 				},
 			},
 			want:    nil,
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {

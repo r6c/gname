@@ -1,6 +1,7 @@
 package gname
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/libdns/libdns"
@@ -29,6 +30,7 @@ type DomainResolutionRecord struct {
 	Mx   string `json:"mx,omitempty"`
 	Xlid int    `json:"xlid,omitempty"`
 	Zt   string `json:"zt,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type AddDomainRecord struct {
@@ -48,16 +50,24 @@ type DeleteDomainRecord struct {
 	Msg  string `json:"msg,omitempty"`
 }
 
-func (record DomainResolutionRecord) toLibdnsRecord(zone string) libdns.Record {
-	// mx, err := strconv.Atoi(record.Mx)
-	// if err != nil {
-	// 	mx = 0
-	// }
+func (record DomainResolutionRecord) toLibdnsRecord(zone string) libdns.RR {
+	// Parse TTL from API response, default to 600 seconds if not provided or invalid
+	ttl := time.Second * 600
+	if record.TTL != "" {
+		if parsedTTL, err := strconv.Atoi(record.TTL); err == nil && parsedTTL > 0 {
+			ttl = time.Duration(parsedTTL) * time.Second
+		}
+	}
 
 	return libdns.RR{
 		Name: record.Zjt,
-		TTL:  time.Second * 120,
 		Type: record.Lx,
 		Data: record.Jxz,
+		TTL:  ttl,
 	}
+}
+
+// RR implements the libdns.Record interface
+func (record DomainResolutionRecord) RR() libdns.RR {
+	return record.toLibdnsRecord("")
 }
