@@ -1,9 +1,9 @@
 package gname
 
 import (
-	"github.com/libdns/libdns"
-	"strconv"
 	"time"
+
+	"github.com/libdns/libdns"
 )
 
 type CommonResponse struct {
@@ -49,17 +49,15 @@ type DeleteDomainRecord struct {
 }
 
 func (record DomainResolutionRecord) toLibdnsRecord(zone string) libdns.Record {
-	mx, err := strconv.Atoi(record.Mx)
-	if err != nil {
-		mx = 0
-	}
+	// mx, err := strconv.Atoi(record.Mx)
+	// if err != nil {
+	// 	mx = 0
+	// }
 
-	return libdns.Record{
-		ID:       record.ID,
-		Name:     record.Zjt,
-		Priority: uint(mx),
-		TTL:      time.Second * 120,
-		Type:     record.Lx,
-		Value:    record.Jxz,
+	return libdns.RR{
+		Name: record.Zjt,
+		TTL:  time.Second * 120,
+		Type: record.Lx,
+		Data: record.Jxz,
 	}
 }
